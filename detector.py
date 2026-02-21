@@ -5,7 +5,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.mixture import GaussianMixture
 from sklearn.ensemble import IsolationForest
 
-csv_filename = "combined_keystroke_data.csv"
+csv_filename = "combined.csv"
 
 try:
     # 1. Load the dataset
@@ -14,55 +14,63 @@ try:
     # 2. Extract features
     X = df[['Flight_Time_s', 'Dwell_Time_s']]
 
-    # 3. Filter out "Noise" using an Isolation Forest
-    # This acts as a bouncer, kicking out weird keystrokes (like 5-second pauses)
-    print("Detecting and removing erratic keystrokes...")
-    iso_forest = IsolationForest(contamination=0.05, random_state=42)  # Assume 5% of data is noise
+    # 3. Filter out "Noise" - Low contamination to keep 1.2s points
+    iso_forest = IsolationForest(contamination=0.05, random_state=52)
     good_data_mask = iso_forest.fit_predict(X) == 1
-
-    # Keep only the clean data
     df_clean = df[good_data_mask].copy()
     X_clean = df_clean[['Flight_Time_s', 'Dwell_Time_s']]
-    print(f"Removed {len(df) - len(df_clean)} outlier keystrokes.")
 
-    # 4. Standardize the clean data
+    # 4. Standardize data
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_clean)
 
-    # 5. Apply Gaussian Mixture Model (GMM)
-    # covariance_type='full' allows each user's cluster to be its own unique elliptical shape
-    print("Calculating probabilistic user distributions (GMM)...")
-    gmm = GaussianMixture(n_components=3, covariance_type='full', random_state=42, n_init=5)
+    # --- 5. DYNAMIC USER DETECTION (BIC) ---
+    print("Finding the optimal number of users...")
+    bic_scores = []
+    n_components_range = range(1, 11)  # Test for 1 to 10 users
 
-    # Predict which user each keystroke belongs to
-    df_clean['Detected_User'] = gmm.fit_predict(X_scaled)
+    for n in n_components_range:
+        gmm = GaussianMixture(n_components=n, random_state=42).fit(X_scaled)
+        bic_scores.append(gmm.bic(X_scaled))
 
-    # 6. Visualize the Advanced Separation
+    # The best n is the one with the lowest BIC score
+    optimal_n = n_components_range[np.argmin(bic_scores)]
+    print(f"✅ Algorithm detected {optimal_n} unique user profiles.")
+
+    # 6. Apply GMM with the detected number of users
+    gmm = GaussianMixture(n_components=optimal_n, covariance_type='full', random_state=42, n_init=5)
+    clusters = gmm.fit_predict(X_scaled)
+    df_clean['Predicted_User'] = [f"User_{c + 1}" for c in clusters]
+
+    # --- 7. Save to predicted.csv ---
+    if 'SL.no.' in df_clean.columns:
+        df_clean = df_clean.drop(columns=['SL.no.'])
+    cols = ['Predicted_User'] + [c for c in df_clean.columns if c != 'Predicted_User']
+    df_clean[cols].to_csv("predicted.csv", index=False)
+
+    # 8. Visualize with dynamic colors
     plt.figure(figsize=(12, 7))
-    colors = ['blue', 'green', 'red']
+    cmap = plt.get_cmap('tab10')  # Supports up to 10 distinct colors
 
-    # Plot the clean, separated data
-    for cluster_num in range(3):
-        cluster_data = df_clean[df_clean['Detected_User'] == cluster_num]
+    for i in range(optimal_n):
+        label_name = f"User_{i + 1}"
+        cluster_data = df_clean[df_clean['Predicted_User'] == label_name]
         plt.scatter(cluster_data['Flight_Time_s'], cluster_data['Dwell_Time_s'],
-                    c=colors[cluster_num], label=f'User Profile {cluster_num + 1}',
+                    color=cmap(i), label=f'Profile {label_name}',
                     alpha=0.6, edgecolors='w', s=60)
 
-    # Plot the mathematical centers (Means of the Gaussian distributions)
+    # Plot Rhythm Centers
     centroids = scaler.inverse_transform(gmm.means_)
     plt.scatter(centroids[:, 0], centroids[:, 1], c='yellow', marker='*', s=500,
                 edgecolors='black', label='User Rhythm Centers')
 
-    # Styling the plot
-    plt.title('Advanced Biometric Separation via Gaussian Mixture Models')
+    plt.title(f'Detected {optimal_n} Unique User Profiles via BIC & GMM')
     plt.xlabel('Flight Time (Seconds)')
     plt.ylabel('Dwell Time (Seconds)')
-    plt.legend()
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.grid(True, linestyle='--', alpha=0.5)
     plt.tight_layout()
     plt.show()
 
-except FileNotFoundError:
-    print(f"Error: Please ensure '{csv_filename}' is in the same folder as this script.")
-except KeyError as e:
-    print(f"Error: Missing expected column in the CSV - {e}")
+except Exception as e:
+    print(f"An error occurred: {e}")
