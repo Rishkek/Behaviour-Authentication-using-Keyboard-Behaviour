@@ -19,7 +19,7 @@ import joblib
 # GLOBALS & BIOMETRIC ALGORITHMS
 # =====================================================================
 print("\n" + "=" * 50)
-print("🚀 INITIALIZING KEYSTROKE DYNAMICS ENGINE")
+print("INITIALIZING KEYSTROKE DYNAMICS ENGINE")
 print("Passwordless Client-Side Authentication Pipeline")
 print("=" * 50)
 
