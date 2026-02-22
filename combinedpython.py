@@ -9,20 +9,20 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import math
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, confusion_matrix
 import joblib
 
 # =====================================================================
-# PHASE 1: DATA COLLECTION (Advanced Metrics)
+# GLOBALS & BIOMETRIC ALGORITHMS
 # =====================================================================
 print("\n" + "=" * 50)
 print("🚀 INITIALIZING KEYSTROKE DYNAMICS ENGINE")
 print("Passwordless Client-Side Authentication Pipeline")
 print("=" * 50)
 
-# Globals for tracking advanced state
 active_keys = {}
 last_release_time = 0.0
 last_press_time = 0.0
@@ -31,6 +31,31 @@ current_csv = ""
 listener = None
 esc_pressed = False
 
+session_data = []
+session_start_time = 0.0
+typed_sentence = ""
+
+# Define the Keyboard Grid for Physical Distance Tracking
+key_coords = {
+    'q':(0,0), 'w':(0,1), 'e':(0,2), 'r':(0,3), 't':(0,4), 'y':(0,5), 'u':(0,6), 'i':(0,7), 'o':(0,8), 'p':(0,9),
+    'a':(1,0.5), 's':(1,1.5), 'd':(1,2.5), 'f':(1,3.5), 'g':(1,4.5), 'h':(1,5.5), 'j':(1,6.5), 'k':(1,7.5), 'l':(1,8.5),
+    'z':(2,0.7), 'x':(2,1.7), 'c':(2,2.7), 'v':(2,3.7), 'b':(2,4.7), 'n':(2,5.7), 'm':(2,6.7)
+}
+
+def calculate_grid_distance(key_pair):
+    """Calculates physical distance between two keys using Euclidean math"""
+    if pd.isna(key_pair) or key_pair == "START" or "_" not in str(key_pair):
+        return 0.0
+    try:
+        k1, k2 = key_pair.split('_')
+        k1, k2 = k1.lower(), k2.lower()
+        if k1 in key_coords and k2 in key_coords:
+            x1, y1 = key_coords[k1]
+            x2, y2 = key_coords[k2]
+            return round(math.dist((x1, y1), (x2, y2)), 2)
+    except Exception:
+        pass
+    return 0.0
 
 def get_key_name(key):
     try:
@@ -38,15 +63,27 @@ def get_key_name(key):
     except AttributeError:
         return str(key).replace("Key.", "<") + ">"
 
-
 def on_press(key):
-    global last_press_time, last_release_time, last_key_pressed, esc_pressed
+    global last_press_time, last_release_time, last_key_pressed, esc_pressed, session_start_time, typed_sentence
     if key == keyboard.Key.esc:
         esc_pressed = True
         return False
 
     timestamp = time.time()
     key_name = get_key_name(key)
+
+    if key_name == ',':
+        return
+
+    if hasattr(key, 'char') and key.char is not None and key.char != ',':
+        typed_sentence += key.char
+    elif key == keyboard.Key.space:
+        typed_sentence += " "
+    elif key == keyboard.Key.backspace:
+        typed_sentence = typed_sentence[:-1]
+
+    if session_start_time == 0.0:
+        session_start_time = timestamp
 
     if key_name not in active_keys:
         flight_dd = (timestamp - last_press_time) if last_press_time else 0.0
@@ -65,36 +102,37 @@ def on_press(key):
         last_press_time = timestamp
         last_key_pressed = key_name
 
-
 def on_release(key):
     global last_release_time
     release_time = time.time()
     key_name = get_key_name(key)
 
+    if key_name == ',':
+        return
+
     if key_name in active_keys:
         data = active_keys[key_name]
         dwell_time = release_time - data['press_time']
 
-        with open(current_csv, mode='a', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow([
-                key_name,
-                data['key_pair'],
-                f"{data['flight_ud']:.4f}",
-                f"{data['flight_dd']:.4f}",
-                f"{dwell_time:.4f}",
-                data['is_overlap']
-            ])
+        session_data.append([
+            key_name,
+            data['key_pair'],
+            f"{data['flight_ud']:.4f}",
+            f"{data['flight_dd']:.4f}",
+            f"{dwell_time:.4f}",
+            data['is_overlap']
+        ])
         del active_keys[key_name]
 
     last_release_time = release_time
-
 
 def stop_listener():
     print("\n⏱️ Time is up! Stopping collection...")
     if listener: listener.stop()
 
-
+# =====================================================================
+# PHASE 1: DATA GATHERING
+# =====================================================================
 print("\n--- PHASE 1: DATA GATHERING ---")
 existing_files = glob.glob("keystroke_data_User_*.csv")
 existing_ids = []
@@ -105,7 +143,6 @@ for f in existing_files:
 if existing_ids:
     print(f"📁 Found existing profiles for Users: {sorted(existing_ids)}")
 
-# UPGRADE: Manual User Selection Loop
 while not esc_pressed:
     user_input = input("\n>> Enter your user id (or 'q' to quit to ML Training): ").strip()
 
@@ -120,27 +157,45 @@ while not esc_pressed:
     current_csv = f"keystroke_data_User_{u_id}.csv"
 
     active_keys.clear()
+    session_data.clear()
     last_release_time = 0.0
     last_press_time = 0.0
     last_key_pressed = ""
+    session_start_time = 0.0
+    typed_sentence = ""
 
     file_exists = os.path.exists(current_csv)
     with open(current_csv, mode='a', newline='') as file:
         writer = csv.writer(file)
         if not file_exists:
-            writer.writerow(["Key", "Key_Pair", "Flight_UD_s", "Flight_DD_s", "Dwell_Time_s", "Is_Overlap"])
+            writer.writerow(
+                ["Key", "Key_Pair", "Flight_UD_s", "Flight_DD_s", "Dwell_Time_s", "Is_Overlap", "Session_WPM"])
 
-    input(f">> Hello User {u_id}, press [ENTER] to begin typing (60s timer)...")
+    input(f">> Hello User {u_id}, press [ENTER] to begin typing (20s timer)...")
     print("User: ", end="", flush=True)
 
-    timer = threading.Timer(60.0, stop_listener)
+    timer = threading.Timer(20.0, stop_listener)
     timer.start()
 
     with keyboard.Listener(on_press=on_press, on_release=on_release) as l:
         listener = l
         listener.join()
 
-    print(f">> Saved to {current_csv}")
+    if session_data:
+        session_end_time = time.time()
+        duration_min = max((session_end_time - session_start_time) / 60.0, 0.001)
+        actual_chars = len(typed_sentence)
+        wpm = round((actual_chars / 5.0) / duration_min, 2)
+
+        print(f"\n📝 Sentence Captured: '{typed_sentence}'")
+        print(f"📊 Session complete! Calculated WPM: {wpm} (Time: {round(duration_min * 60, 1)}s)")
+
+        with open(current_csv, mode='a', newline='') as file:
+            writer = csv.writer(file)
+            for row in session_data:
+                writer.writerow(row + [wpm])
+
+        print(f">> Saved to {current_csv}")
 
     if esc_pressed:
         break
@@ -156,7 +211,7 @@ for file_name in all_existing_files:
     match = re.search(r'User_(\d+)\.csv', file_name)
     if match:
         try:
-            df = pd.read_csv(file_name)
+            df = pd.read_csv(file_name, on_bad_lines='skip')
             if not df.empty:
                 df['ID'] = int(match.group(1))
                 all_dfs.append(df)
@@ -198,12 +253,39 @@ plt.grid(True, linestyle='--', alpha=0.5)
 plt.show()
 
 # =====================================================================
+# PHASE 3.5: BIOMETRIC DECAY ANALYSIS
+# =====================================================================
+print("\n--- PHASE 3.5: BIOMETRIC DECAY ANALYSIS ---")
+df_ml = pd.read_csv("ord_combine.csv").dropna()
+
+# Extract Physical Keyboard Distance & Instantaneous Speed
+df_ml['Flight_DD_s'] = pd.to_numeric(df_ml['Flight_DD_s'], errors='coerce')
+df_ml['Grid_Distance'] = df_ml['Key_Pair'].apply(calculate_grid_distance)
+df_ml['Instant_WPM'] = 60 / (df_ml['Flight_DD_s'].clip(lower=0.01) * 5)
+
+decay_plot_df = df_ml[df_ml['Grid_Distance'] > 0]
+
+
+plt.figure(figsize=(10, 6))
+sns.regplot(data=decay_plot_df, x='Grid_Distance', y='Instant_WPM',
+            scatter_kws={'alpha':0.3, 'color':'teal'}, line_kws={'color':'red', 'linewidth':2})
+
+plt.title("Biometric Decay: WPM vs. Keyboard Reach Distance", fontweight='bold')
+plt.xlabel("Physical Keyboard Reach Distance (Grid Units)")
+plt.ylabel("Effective Instant WPM")
+plt.grid(True, linestyle='--', alpha=0.6)
+
+plt.text(decay_plot_df['Grid_Distance'].max()*0.4, decay_plot_df['Instant_WPM'].max()*0.85,
+         "Steep Slope = Small Hand Span\nFlat Slope = Large Hand Span",
+         bbox=dict(facecolor='white', alpha=0.9, edgecolor='black', boxstyle='round,pad=0.5'))
+
+print("Displaying Biometric Decay Graph. (Close the window to proceed).")
+plt.show()
+
+# =====================================================================
 # PHASE 4: DETECTOR (MACHINE LEARNING)
 # =====================================================================
 print("\n--- PHASE 4: ML TRAINING (Random Forest) ---")
-df_ml = pd.read_csv("ord_combine.csv").dropna()
-
-# UPGRADE: Dynamic Anomaly Detection (Isolation Forest)
 print("Filtering out human errors using Isolation Forest (Per User)...")
 
 clean_dfs = []
@@ -211,25 +293,20 @@ clean_dfs = []
 for uid in df_ml['ID'].unique():
     user_data = df_ml[df_ml['ID'] == uid].copy()
 
-    # If a user has very few keystrokes, skip filtering to prevent crashing
     if len(user_data) < 10:
         clean_dfs.append(user_data)
         continue
 
-    features = user_data[['Flight_UD_s', 'Dwell_Time_s']]
+    # Include WPM and physical distance into anomaly detection
+    features = user_data[['Flight_UD_s', 'Dwell_Time_s', 'Session_WPM', 'Grid_Distance']]
 
-    # Contamination=0.05 assumes roughly 5% of a user's keystrokes are pauses/sneezes/errors
     iso_forest = IsolationForest(contamination=0.05, random_state=42)
     inliers = iso_forest.fit_predict(features)
 
-    # Keep only the normal behavior rows (where prediction is 1)
     clean_user_data = user_data[inliers == 1]
     clean_dfs.append(clean_user_data)
 
-# Re-combine the clean data and strictly preserve the original sorting
 df_ml = pd.concat(clean_dfs).sort_index()
-
-# CRITICAL: Save exact indices so Phase 5 matches perfectly
 valid_indices = df_ml.index
 
 print("Calculating macro-rhythm trends...")
@@ -254,11 +331,12 @@ accuracy = accuracy_score(y_test, test_predictions)
 print(f"✅ Baseline ML Model Accuracy: {accuracy * 100:.2f}%")
 
 joblib.dump(rf_model, 'advanced_keystroke_model.pkl')
+# CRITICAL FOR LIVE PREDICTOR: Save the exact training columns
+joblib.dump(X_train.columns, 'model_columns.pkl')
 
 raw_predictions = rf_model.predict(X)
 output_df = df_ml.copy()
 
-# UPGRADE: Apply a Rolling Majority Vote (Smoothing)
 pred_series = pd.Series(raw_predictions)
 smoothed_predictions = pred_series.rolling(window=7, min_periods=1).apply(
     lambda x: x.mode()[0] if not x.mode().empty else x.iloc[-1]
@@ -288,13 +366,10 @@ plt.show()
 # =====================================================================
 print("\n--- PHASE 5: SYSTEM AUDIT ---")
 df_true = pd.read_csv("ord_combine.csv").dropna()
-
-# CRITICAL FIX: Ensure the truth dataframe perfectly matches the rows that survived IsolationForest
 df_true = df_true.loc[valid_indices]
 
 df_pred = pd.read_csv("predicted.csv")
 
-# Direct Assignment to bypass float precision merge issues
 merged = df_pred.copy()
 merged['Actual_ID'] = df_true['ID'].values
 
