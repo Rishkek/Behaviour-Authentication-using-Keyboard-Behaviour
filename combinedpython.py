@@ -9,14 +9,16 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, confusion_matrix
 import joblib
 
-#phase 1, data collection.
+# =====================================================================
+# PHASE 1: DATA COLLECTION (Advanced Metrics)
+# =====================================================================
 print("\n" + "=" * 50)
-print("INITIALIZING KEYSTROKE DYNAMICS ENGINE")
+print("🚀 INITIALIZING KEYSTROKE DYNAMICS ENGINE")
 print("Passwordless Client-Side Authentication Pipeline")
 print("=" * 50)
 
@@ -47,17 +49,11 @@ def on_press(key):
     key_name = get_key_name(key)
 
     if key_name not in active_keys:
-        # Calculate Advanced Latency Metrics
         flight_dd = (timestamp - last_press_time) if last_press_time else 0.0
         flight_ud = (timestamp - last_release_time) if last_release_time else 0.0
-
-        # Determine if this key was pressed before the previous one was released
         is_overlap = 1 if (last_release_time == 0.0 or last_press_time > last_release_time) else 0
-
-        # Create Digraph (Key Pair)
         key_pair = f"{last_key_pressed}_{key_name}" if last_key_pressed else "START"
 
-        # Store metrics at the exact moment of press
         active_keys[key_name] = {
             'press_time': timestamp,
             'flight_dd': flight_dd,
@@ -79,7 +75,6 @@ def on_release(key):
         data = active_keys[key_name]
         dwell_time = release_time - data['press_time']
 
-        # Write the enriched data row
         with open(current_csv, mode='a', newline='') as file:
             writer = csv.writer(file)
             writer.writerow([
@@ -100,35 +95,43 @@ def stop_listener():
     if listener: listener.stop()
 
 
-# Find next available ID
+print("\n--- PHASE 1: DATA GATHERING ---")
 existing_files = glob.glob("keystroke_data_User_*.csv")
-max_id = 0
+existing_ids = []
 for f in existing_files:
     match = re.search(r'User_(\d+)\.csv', f)
-    if match: max_id = max(max_id, int(match.group(1)))
+    if match: existing_ids.append(int(match.group(1)))
 
-u_id = max_id + 1
+if existing_ids:
+    print(f"📁 Found existing profiles for Users: {sorted(existing_ids)}")
 
-print("\n--- PHASE 1: DATA GATHERING ---")
-print("Press [Esc] at the prompt to end data collection and proceed to ML Training.")
-if max_id > 0: print(f"📁 Found existing profiles up to User {max_id}.")
-
+# UPGRADE: Manual User Selection Loop
 while not esc_pressed:
+    user_input = input("\n>> Enter your user id (or 'q' to quit to ML Training): ").strip()
+
+    if user_input.lower() == 'q':
+        break
+
+    if not user_input.isdigit():
+        print("❌ Please enter a valid numeric ID.")
+        continue
+
+    u_id = int(user_input)
     current_csv = f"keystroke_data_User_{u_id}.csv"
+
     active_keys.clear()
     last_release_time = 0.0
     last_press_time = 0.0
     last_key_pressed = ""
 
-    with open(current_csv, mode='w', newline='') as file:
+    file_exists = os.path.exists(current_csv)
+    with open(current_csv, mode='a', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(["Key", "Key_Pair", "Flight_UD_s", "Flight_DD_s", "Dwell_Time_s", "Is_Overlap"])
+        if not file_exists:
+            writer.writerow(["Key", "Key_Pair", "Flight_UD_s", "Flight_DD_s", "Dwell_Time_s", "Is_Overlap"])
 
-    # UPGRADE: 60 Second Timer for robust data collection
-    input(f"\nUser {u_id} Ready? Press [ENTER] to start 60s timer (or [Esc] then [Enter] to skip to ML)...")
-    if esc_pressed:
-        if os.path.exists(current_csv): os.remove(current_csv)
-        break
+    input(f">> Hello User {u_id}, press [ENTER] to begin typing (60s timer)...")
+    print("User: ", end="", flush=True)
 
     timer = threading.Timer(60.0, stop_listener)
     timer.start()
@@ -136,9 +139,15 @@ while not esc_pressed:
     with keyboard.Listener(on_press=on_press, on_release=on_release) as l:
         listener = l
         listener.join()
-    u_id += 1
 
-#phase 2: combination
+    print(f">> Saved to {current_csv}")
+
+    if esc_pressed:
+        break
+
+# =====================================================================
+# PHASE 2: COMBINATION
+# =====================================================================
 print("\n--- PHASE 2: DATA COMBINATION ---")
 all_dfs = []
 all_existing_files = glob.glob("keystroke_data_User_*.csv")
@@ -160,7 +169,6 @@ if not all_dfs:
 
 full_data = pd.concat(all_dfs, ignore_index=True)
 
-# Generate ordered and unordered master files
 unordered = full_data.drop(columns=['ID']).copy()
 unordered.insert(0, 'SL.no.', range(1, len(unordered) + 1))
 unordered.to_csv("combined.csv", index=False)
@@ -169,19 +177,18 @@ ordered = full_data.sort_values(by='ID').copy()
 cols = ['ID'] + [c for c in ordered.columns if c != 'ID']
 ordered = ordered[cols]
 ordered.to_csv("ord_combine.csv", index=False)
-print("success, Master datasets generated (combined.csv, ord_combine.csv).")
+print("✅ Master datasets generated (combined.csv, ord_combine.csv).")
 
 # =====================================================================
 # PHASE 3: RAW DATA VISUALIZATION
 # =====================================================================
-
 print("\n--- PHASE 3: RAW DATA VISUALIZATION ---")
 print("Visualizing raw Dwell vs Flight (UD) signatures. (Close the window to proceed).")
 plt.figure(figsize=(10, 6))
 user_ids = ordered['ID'].unique()
 for uid in user_ids:
     user_data = ordered[ordered['ID'] == uid]
-    plt.scatter(user_data['Flight_UD_s'], user_data['Dwell_Time_s'], alpha=0.5, label=f'User {uid}', s=40)
+    plt.scatter(user_data['Flight_UD_s'], user_data['Dwell_Time_s'], alpha=0.5, label=f'User {uid}', s=14)
 
 plt.title('Raw Keystroke Signature: Dwell Time vs. Flight Time (UD)')
 plt.xlabel('Up-to-Down Flight Time (s)')
@@ -196,18 +203,41 @@ plt.show()
 print("\n--- PHASE 4: ML TRAINING (Random Forest) ---")
 df_ml = pd.read_csv("ord_combine.csv").dropna()
 
-# UPGRADE: Remove extreme human error (pauses > 1s, overly long dwells)
-print("Filtering out human errors and extreme outliers...")
-df_ml = df_ml[(df_ml['Flight_UD_s'] < 1.0) & (df_ml['Dwell_Time_s'] < 0.5)]
+# UPGRADE: Dynamic Anomaly Detection (Isolation Forest)
+print("Filtering out human errors using Isolation Forest (Per User)...")
 
-# Apply Rolling Averages
+clean_dfs = []
+
+for uid in df_ml['ID'].unique():
+    user_data = df_ml[df_ml['ID'] == uid].copy()
+
+    # If a user has very few keystrokes, skip filtering to prevent crashing
+    if len(user_data) < 10:
+        clean_dfs.append(user_data)
+        continue
+
+    features = user_data[['Flight_UD_s', 'Dwell_Time_s']]
+
+    # Contamination=0.05 assumes roughly 5% of a user's keystrokes are pauses/sneezes/errors
+    iso_forest = IsolationForest(contamination=0.05, random_state=42)
+    inliers = iso_forest.fit_predict(features)
+
+    # Keep only the normal behavior rows (where prediction is 1)
+    clean_user_data = user_data[inliers == 1]
+    clean_dfs.append(clean_user_data)
+
+# Re-combine the clean data and strictly preserve the original sorting
+df_ml = pd.concat(clean_dfs).sort_index()
+
+# CRITICAL: Save exact indices so Phase 5 matches perfectly
+valid_indices = df_ml.index
+
 print("Calculating macro-rhythm trends...")
 df_ml['Rolling_Flight'] = df_ml.groupby('ID')['Flight_UD_s'].transform(
     lambda x: x.rolling(window=3, min_periods=1).mean())
 df_ml['Rolling_Dwell'] = df_ml.groupby('ID')['Dwell_Time_s'].transform(
     lambda x: x.rolling(window=3, min_periods=1).mean())
 
-# One-Hot Encode structural data
 print("Encoding Keyboard Digraphs and structural features...")
 df_encoded = pd.get_dummies(df_ml, columns=['Key', 'Key_Pair'])
 
@@ -221,16 +251,14 @@ rf_model.fit(X_train, y_train)
 
 test_predictions = rf_model.predict(X_test)
 accuracy = accuracy_score(y_test, test_predictions)
-print(f" Baseline ML Model Accuracy: {accuracy * 100:.2f}%")
+print(f"✅ Baseline ML Model Accuracy: {accuracy * 100:.2f}%")
 
 joblib.dump(rf_model, 'advanced_keystroke_model.pkl')
 
-# Generate Full Predictions for Auditing
 raw_predictions = rf_model.predict(X)
 output_df = df_ml.copy()
 
 # UPGRADE: Apply a Rolling Majority Vote (Smoothing)
-# Looks at groups of 7 keystrokes to filter out isolated errors/typos
 pred_series = pd.Series(raw_predictions)
 smoothed_predictions = pred_series.rolling(window=7, min_periods=1).apply(
     lambda x: x.mode()[0] if not x.mode().empty else x.iloc[-1]
@@ -255,15 +283,18 @@ plt.ylabel("Actual User")
 plt.tight_layout()
 plt.show()
 
-#part 5: final audiit
+# =====================================================================
+# PHASE 5: COMPARATOR AUDIT
+# =====================================================================
 print("\n--- PHASE 5: SYSTEM AUDIT ---")
 df_true = pd.read_csv("ord_combine.csv").dropna()
-# Ensure the truth dataframe gets the exact same filtering as the ML dataframe
-df_true = df_true[(df_true['Flight_UD_s'] < 1.0) & (df_true['Dwell_Time_s'] < 0.5)]
+
+# CRITICAL FIX: Ensure the truth dataframe perfectly matches the rows that survived IsolationForest
+df_true = df_true.loc[valid_indices]
 
 df_pred = pd.read_csv("predicted.csv")
 
-# UPGRADE: Direct Assignment instead of float-merging to preserve 100% of rows
+# Direct Assignment to bypass float precision merge issues
 merged = df_pred.copy()
 merged['Actual_ID'] = df_true['ID'].values
 
