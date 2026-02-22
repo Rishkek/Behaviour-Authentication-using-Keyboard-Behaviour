@@ -14,11 +14,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, confusion_matrix
 import joblib
 
-# =====================================================================
-# PHASE 1: DATA COLLECTION (Advanced Metrics)
-# =====================================================================
+#phase 1, data collection.
 print("\n" + "=" * 50)
-print("🚀 INITIALIZING KEYSTROKE DYNAMICS ENGINE")
+print("INITIALIZING KEYSTROKE DYNAMICS ENGINE")
 print("Passwordless Client-Side Authentication Pipeline")
 print("=" * 50)
 
@@ -126,12 +124,13 @@ while not esc_pressed:
         writer = csv.writer(file)
         writer.writerow(["Key", "Key_Pair", "Flight_UD_s", "Flight_DD_s", "Dwell_Time_s", "Is_Overlap"])
 
-    input(f"\nUser {u_id} Ready? Press [ENTER] to start 10s timer (or [Esc] then [Enter] to skip to ML)...")
+    # UPGRADE: 60 Second Timer for robust data collection
+    input(f"\nUser {u_id} Ready? Press [ENTER] to start 60s timer (or [Esc] then [Enter] to skip to ML)...")
     if esc_pressed:
         if os.path.exists(current_csv): os.remove(current_csv)
         break
 
-    timer = threading.Timer(10.0, stop_listener)
+    timer = threading.Timer(60.0, stop_listener)
     timer.start()
 
     with keyboard.Listener(on_press=on_press, on_release=on_release) as l:
@@ -139,9 +138,7 @@ while not esc_pressed:
         listener.join()
     u_id += 1
 
-# =====================================================================
-# PHASE 2: COMBINATION
-# =====================================================================
+#phase 2: combination
 print("\n--- PHASE 2: DATA COMBINATION ---")
 all_dfs = []
 all_existing_files = glob.glob("keystroke_data_User_*.csv")
@@ -172,7 +169,7 @@ ordered = full_data.sort_values(by='ID').copy()
 cols = ['ID'] + [c for c in ordered.columns if c != 'ID']
 ordered = ordered[cols]
 ordered.to_csv("ord_combine.csv", index=False)
-print("✅ Master datasets generated (combined.csv, ord_combine.csv).")
+print("success, Master datasets generated (combined.csv, ord_combine.csv).")
 
 # =====================================================================
 # PHASE 3: RAW DATA VISUALIZATION
@@ -199,6 +196,10 @@ plt.show()
 print("\n--- PHASE 4: ML TRAINING (Random Forest) ---")
 df_ml = pd.read_csv("ord_combine.csv").dropna()
 
+# UPGRADE: Remove extreme human error (pauses > 1s, overly long dwells)
+print("Filtering out human errors and extreme outliers...")
+df_ml = df_ml[(df_ml['Flight_UD_s'] < 1.0) & (df_ml['Dwell_Time_s'] < 0.5)]
+
 # Apply Rolling Averages
 print("Calculating macro-rhythm trends...")
 df_ml['Rolling_Flight'] = df_ml.groupby('ID')['Flight_UD_s'].transform(
@@ -220,14 +221,22 @@ rf_model.fit(X_train, y_train)
 
 test_predictions = rf_model.predict(X_test)
 accuracy = accuracy_score(y_test, test_predictions)
-print(f"✅ ML Model Accuracy: {accuracy * 100:.2f}%")
+print(f" Baseline ML Model Accuracy: {accuracy * 100:.2f}%")
 
 joblib.dump(rf_model, 'advanced_keystroke_model.pkl')
 
 # Generate Full Predictions for Auditing
-all_predictions = rf_model.predict(X)
+raw_predictions = rf_model.predict(X)
 output_df = df_ml.copy()
-output_df['Predicted_User'] = [f"User_{pred}" for pred in all_predictions]
+
+# UPGRADE: Apply a Rolling Majority Vote (Smoothing)
+# Looks at groups of 7 keystrokes to filter out isolated errors/typos
+pred_series = pd.Series(raw_predictions)
+smoothed_predictions = pred_series.rolling(window=7, min_periods=1).apply(
+    lambda x: x.mode()[0] if not x.mode().empty else x.iloc[-1]
+).astype(int)
+
+output_df['Predicted_User'] = [f"User_{pred}" for pred in smoothed_predictions]
 
 output_df = output_df.drop(columns=['ID', 'Rolling_Flight', 'Rolling_Dwell'], errors='ignore')
 cols = ['Predicted_User'] + [c for c in output_df.columns if c != 'Predicted_User']
@@ -246,25 +255,27 @@ plt.ylabel("Actual User")
 plt.tight_layout()
 plt.show()
 
-# =====================================================================
-# PHASE 5: COMPARATOR AUDIT
-# =====================================================================
+#part 5: final audiit
 print("\n--- PHASE 5: SYSTEM AUDIT ---")
-df_true = pd.read_csv("ord_combine.csv")
+df_true = pd.read_csv("ord_combine.csv").dropna()
+# Ensure the truth dataframe gets the exact same filtering as the ML dataframe
+df_true = df_true[(df_true['Flight_UD_s'] < 1.0) & (df_true['Dwell_Time_s'] < 0.5)]
+
 df_pred = pd.read_csv("predicted.csv")
 
-# Merge using the new primary flight metric to align events
-merged = pd.merge(df_true, df_pred, on=['Key', 'Flight_UD_s', 'Dwell_Time_s'], how='inner')
+# UPGRADE: Direct Assignment instead of float-merging to preserve 100% of rows
+merged = df_pred.copy()
+merged['Actual_ID'] = df_true['ID'].values
 
 label_map = {}
-for actual_id in merged['ID'].unique():
-    id_data = merged[merged['ID'] == actual_id]
+for actual_id in merged['Actual_ID'].unique():
+    id_data = merged[merged['Actual_ID'] == actual_id]
     if not id_data.empty:
         most_frequent_guess = id_data['Predicted_User'].value_counts().idxmax()
         label_map[most_frequent_guess] = actual_id
 
 merged['Mapped_Predicted_ID'] = merged['Predicted_User'].map(label_map)
-merged['Is_Error'] = merged['ID'] != merged['Mapped_Predicted_ID']
+merged['Is_Error'] = merged['Actual_ID'] != merged['Mapped_Predicted_ID']
 
 errors = merged[merged['Is_Error'] == True]
 correct = merged[merged['Is_Error'] == False]
@@ -293,7 +304,7 @@ print("FINAL PIPELINE REPORT")
 print(f"Total Keystrokes Analyzed: {len(merged)}")
 print(f"Successful Identifications: {len(correct)}")
 print(f"Security Mismatches: {len(errors)}")
-print(f"Final Pipeline Accuracy: {(len(correct) / len(merged)) * 100 if len(merged) > 0 else 0:.2f}%")
+print(f"Final Smoothed Pipeline Accuracy: {(len(correct) / len(merged)) * 100 if len(merged) > 0 else 0:.2f}%")
 print("=" * 40)
 
 print("Displaying final audit graphs...")
