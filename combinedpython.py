@@ -1,15 +1,19 @@
-import time
-import csv
-import threading
+import time #clock
+import csv #maintains csv files
+import threading #works as a multitasker, allows parallel workflow of the timer and the keyboard input
 import pandas as pd
-from pynput import keyboard
-import glob
-import re
-import os
-import matplotlib.pyplot as plt
+#loads your CSVs into memory as DataFrames (virtual Excel tables) so you can merge,
+# filter, and calculate rolling averages across thousands of rows instantly.
+
+
+from pynput import keyboard #gets packets of data from input devices
+import glob #hunts for files by searching keywords
+import re #regular expresion
+import os #file inspector
+import matplotlib.pyplot as plt #plots graphs for representation
 import numpy as np
-import seaborn as sns
-import math
+import seaborn as sns #built on top of matplotlib
+import math #math.
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, confusion_matrix
@@ -35,12 +39,31 @@ session_data = []
 session_start_time = 0.0
 typed_sentence = ""
 
-# Define the Keyboard Grid for Physical Distance Tracking
+# Define the Expanded Keyboard Grid for Physical Distance Tracking
 key_coords = {
-    'q':(0,0), 'w':(0,1), 'e':(0,2), 'r':(0,3), 't':(0,4), 'y':(0,5), 'u':(0,6), 'i':(0,7), 'o':(0,8), 'p':(0,9),
-    'a':(1,0.5), 's':(1,1.5), 'd':(1,2.5), 'f':(1,3.5), 'g':(1,4.5), 'h':(1,5.5), 'j':(1,6.5), 'k':(1,7.5), 'l':(1,8.5),
-    'z':(2,0.7), 'x':(2,1.7), 'c':(2,2.7), 'v':(2,3.7), 'b':(2,4.7), 'n':(2,5.7), 'm':(2,6.7)
+    # Number Row (Row -1)
+    '`': (-1, -1), '~': (-1, -1),
+    '1': (-1, 0), '!': (-1, 0), '2': (-1, 1), '@': (-1, 1), '3': (-1, 2), '#': (-1, 2),
+    '4': (-1, 3), '$': (-1, 3), '5': (-1, 4), '%': (-1, 4), '6': (-1, 5), '^': (-1, 5),
+    '7': (-1, 6), '&': (-1, 6), '8': (-1, 7), '*': (-1, 7), '9': (-1, 8), '(': (-1, 8),
+    '0': (-1, 9), ')': (-1, 9), '-': (-1, 10), '_': (-1, 10), '=': (-1, 11), '+': (-1, 11),
+    # Top Alphabet Row (Row 0)
+    'q': (0, 0), 'w': (0, 1), 'e': (0, 2), 'r': (0, 3), 't': (0, 4), 'y': (0, 5),
+    'u': (0, 6), 'i': (0, 7), 'o': (0, 8), 'p': (0, 9),
+    '[': (0, 10), '{': (0, 10), ']': (0, 11), '}': (0, 11), '\\': (0, 12), '|': (0, 12),
+    # Home Row (Row 1)
+    'a': (1, 0.5), 's': (1, 1.5), 'd': (1, 2.5), 'f': (1, 3.5), 'g': (1, 4.5),
+    'h': (1, 5.5), 'j': (1, 6.5), 'k': (1, 7.5), 'l': (1, 8.5),
+    ';': (1, 9.5), ':': (1, 9.5), '\'': (1, 10.5), '"': (1, 10.5),
+    # Bottom Row (Row 2)
+    'z': (2, 0.7), 'x': (2, 1.7), 'c': (2, 2.7), 'v': (2, 3.7), 'b': (2, 4.7),
+    'n': (2, 5.7), 'm': (2, 6.7),
+    ',': (2, 7.7), '<': (2, 7.7), '.': (2, 8.7), '>': (2, 8.7), '/': (2, 9.7), '?': (2, 9.7),
+
+    # Spacebar
+    ' ': (3, 4.5)
 }
+
 
 def calculate_grid_distance(key_pair):
     """Calculates physical distance between two keys using Euclidean math"""
@@ -57,11 +80,13 @@ def calculate_grid_distance(key_pair):
         pass
     return 0.0
 
+
 def get_key_name(key):
     try:
         return key.char
     except AttributeError:
         return str(key).replace("Key.", "<") + ">"
+
 
 def on_press(key):
     global last_press_time, last_release_time, last_key_pressed, esc_pressed, session_start_time, typed_sentence
@@ -72,6 +97,7 @@ def on_press(key):
     timestamp = time.time()
     key_name = get_key_name(key)
 
+    # STRICT EXCEPTION: Ignore commas to prevent CSV corruption
     if key_name == ',':
         return
 
@@ -102,11 +128,13 @@ def on_press(key):
         last_press_time = timestamp
         last_key_pressed = key_name
 
+
 def on_release(key):
     global last_release_time
     release_time = time.time()
     key_name = get_key_name(key)
 
+    # STRICT EXCEPTION: Ignore commas to prevent CSV corruption
     if key_name == ',':
         return
 
@@ -126,9 +154,11 @@ def on_release(key):
 
     last_release_time = release_time
 
+
 def stop_listener():
-    print("\n⏱️ Time is up! Stopping collection...")
+    print("\n Time is up! Stopping collection...")
     if listener: listener.stop()
+
 
 # =====================================================================
 # PHASE 1: DATA GATHERING
@@ -141,7 +171,7 @@ for f in existing_files:
     if match: existing_ids.append(int(match.group(1)))
 
 if existing_ids:
-    print(f"📁 Found existing profiles for Users: {sorted(existing_ids)}")
+    print(f"Found existing profiles for Users: {sorted(existing_ids)}")
 
 while not esc_pressed:
     user_input = input("\n>> Enter your user id (or 'q' to quit to ML Training): ").strip()
@@ -150,7 +180,7 @@ while not esc_pressed:
         break
 
     if not user_input.isdigit():
-        print("❌ Please enter a valid numeric ID.")
+        print("Please enter a valid numeric ID.")
         continue
 
     u_id = int(user_input)
@@ -187,8 +217,8 @@ while not esc_pressed:
         actual_chars = len(typed_sentence)
         wpm = round((actual_chars / 5.0) / duration_min, 2)
 
-        print(f"\n📝 Sentence Captured: '{typed_sentence}'")
-        print(f"📊 Session complete! Calculated WPM: {wpm} (Time: {round(duration_min * 60, 1)}s)")
+        print(f"\nSentence Captured: '{typed_sentence}'")
+        print(f"Session complete! Calculated WPM: {wpm} (Time: {round(duration_min * 60, 1)}s)")
 
         with open(current_csv, mode='a', newline='') as file:
             writer = csv.writer(file)
@@ -219,7 +249,7 @@ for file_name in all_existing_files:
             continue
 
 if not all_dfs:
-    print("❌ No data found. Exiting pipeline.")
+    print(" No data found. Exiting pipeline.")
     exit()
 
 full_data = pd.concat(all_dfs, ignore_index=True)
@@ -232,7 +262,7 @@ ordered = full_data.sort_values(by='ID').copy()
 cols = ['ID'] + [c for c in ordered.columns if c != 'ID']
 ordered = ordered[cols]
 ordered.to_csv("ord_combine.csv", index=False)
-print("✅ Master datasets generated (combined.csv, ord_combine.csv).")
+print(" Master datasets generated (combined.csv, ord_combine.csv).")
 
 # =====================================================================
 # PHASE 3: RAW DATA VISUALIZATION
@@ -265,17 +295,16 @@ df_ml['Instant_WPM'] = 60 / (df_ml['Flight_DD_s'].clip(lower=0.01) * 5)
 
 decay_plot_df = df_ml[df_ml['Grid_Distance'] > 0]
 
-
 plt.figure(figsize=(10, 6))
 sns.regplot(data=decay_plot_df, x='Grid_Distance', y='Instant_WPM',
-            scatter_kws={'alpha':0.3, 'color':'teal'}, line_kws={'color':'red', 'linewidth':2})
+            scatter_kws={'alpha': 0.3, 'color': 'teal'}, line_kws={'color': 'red', 'linewidth': 2})
 
 plt.title("Biometric Decay: WPM vs. Keyboard Reach Distance", fontweight='bold')
 plt.xlabel("Physical Keyboard Reach Distance (Grid Units)")
 plt.ylabel("Effective Instant WPM")
 plt.grid(True, linestyle='--', alpha=0.6)
 
-plt.text(decay_plot_df['Grid_Distance'].max()*0.4, decay_plot_df['Instant_WPM'].max()*0.85,
+plt.text(decay_plot_df['Grid_Distance'].max() * 0.4, decay_plot_df['Instant_WPM'].max() * 0.85,
          "Steep Slope = Small Hand Span\nFlat Slope = Large Hand Span",
          bbox=dict(facecolor='white', alpha=0.9, edgecolor='black', boxstyle='round,pad=0.5'))
 

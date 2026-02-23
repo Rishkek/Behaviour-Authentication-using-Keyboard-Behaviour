@@ -173,7 +173,7 @@ def on_release(key):
 
 
 print("=" * 50)
-print("⌨️  INTERACTIVE KEYSTROKE PREDICTOR (ADVANCED)")
+print("INTERACTIVE KEYSTROKE PREDICTOR (ADVANCED)")
 print("=" * 50)
 print("Type a random sentence below. Press ENTER when finished.")
 
@@ -181,14 +181,14 @@ session_start_time = 0.0
 listener = keyboard.Listener(on_press=on_press, on_release=on_release)
 listener.start()
 
-user_input = input("\n📝 Textbox: ")
+user_input = input("\n Textbox: ")
 listener.join()
 
 # =======================================================
 # PHASE 3: Prediction & Feedback Loop
 # =======================================================
 if not live_data:
-    print("\n❌ No typing detected! Run the script again.")
+    print("\n!No typing detected! Run the script again.")
 else:
     # ACCURATE WPM CALCULATION
     session_end_time = time.time()
@@ -196,8 +196,8 @@ else:
     actual_chars = len(typed_sentence)
     wpm = round((actual_chars / 5.0) / duration_min, 2)
 
-    print(f"\n📝 Sentence Captured: '{typed_sentence}'")
-    print(f"📊 Session complete! Calculated WPM: {wpm} (Time: {round(duration_min * 60, 1)}s)")
+    print(f"\n Sentence Captured: '{typed_sentence}'")
+    print(f"Session complete! Calculated WPM: {wpm} (Time: {round(duration_min * 60, 1)}s)")
 
     # Convert live data to DataFrame
     live_df = pd.DataFrame(live_data,
@@ -226,7 +226,7 @@ else:
     confidence = (votes / len(predictions)) * 100
 
     print("\n" + "=" * 50)
-    print(f"🤖 AI PREDICTION: You are USER {predicted_user} (Confidence: {confidence:.1f}%)")
+    print(f"AI PREDICTION: You are USER {predicted_user} (Confidence: {confidence:.1f}%)")
     print("=" * 50)
 
     is_correct = input(f"Was this prediction correct? (y/n): ").strip().lower()
@@ -235,9 +235,9 @@ else:
         print(f"✅ Great! Saving your new data to User {predicted_user}'s profile...")
         actual_id = predicted_user
     else:
-        actual_id_input = input("❌ Whoops! What is your actual User ID? (Enter a number): ").strip()
+        actual_id_input = input("Wrong... What is your actual User ID? (Enter a number): ").strip()
         actual_id = int(actual_id_input) if actual_id_input.isdigit() else 999
-        print(f"🔄 Understood. Learning from mistake. Saving data to User {actual_id}...")
+        print(f"Understood. Learning from mistake. Saving data to User {actual_id}...")
 
     # =======================================================
     # PHASE 4: Update the Datasets (Continuous Learning)
@@ -272,5 +272,5 @@ else:
 
     hand_data.to_csv(hand_filename, mode='a', header=not hand_file_exists, index=False)
 
-    print(f"💾 Databases updated! Data appended to {user_filename}.")
-    print(f"🖐️ Hand size calculation logged to {hand_filename} (Estimated: {estimated_span} cm).")
+    print(f">>Databases updated! Data appended to {user_filename}.")
+    print(f">>Hand size calculation logged to {hand_filename} (Estimated: {estimated_span} cm).")

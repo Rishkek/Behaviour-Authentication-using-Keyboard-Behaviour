@@ -7,7 +7,7 @@ COMBINED_FILE = "combined.csv"
 
 
 def purge_user_data(target_id):
-    print(f"\n🗑️ Initiating deletion protocol for User {target_id}...")
+    print(f"\n Initiating deletion protocol for User {target_id}...")
 
     # 1. Delete individual user metric files
     keystroke_file = f"keystroke_data_User_{target_id}.csv"
@@ -17,9 +17,9 @@ def purge_user_data(target_id):
     for file_path in files_to_delete:
         if os.path.exists(file_path):
             os.remove(file_path)
-            print(f"✅ Deleted local file: {file_path}")
+            print(f"Deleted local file: {file_path}")
         else:
-            print(f"⚠️ File not found (skipping): {file_path}")
+            print(f"File not found (skipping): {file_path}")
 
     # 2. Purge from Master Databases
     if os.path.exists(ORD_FILE):
@@ -37,7 +37,7 @@ def purge_user_data(target_id):
 
                 # Save the scrubbed ordered dataset
                 df_ord.to_csv(ORD_FILE, index=False)
-                print(f"✅ Removed {deleted_rows} keystrokes belonging to User {target_id} from {ORD_FILE}")
+                print(f" Removed {deleted_rows} keystrokes belonging to User {target_id} from {ORD_FILE}")
 
                 # 3. Rebuild combined.csv from scratch
                 # This guarantees no orphaned anonymous data is left behind
@@ -45,7 +45,7 @@ def purge_user_data(target_id):
                     df_combined = df_ord.drop(columns=['ID']).copy()
                     df_combined.insert(0, 'SL.no.', range(1, len(df_combined) + 1))
                     df_combined.to_csv(COMBINED_FILE, index=False)
-                    print(f"✅ Rebuilt {COMBINED_FILE} successfully. All traces eliminated.")
+                    print(f" Rebuilt {COMBINED_FILE} successfully. All traces eliminated.")
                 else:
                     # If deleting this user empties the entire database
                     if os.path.exists(COMBINED_FILE):
@@ -56,9 +56,9 @@ def purge_user_data(target_id):
                 print(f"⚠️ User {target_id} not found inside {ORD_FILE}. No database rows deleted.")
 
         except Exception as e:
-            print(f"❌ Error processing databases: {e}")
+            print(f" Error processing databases: {e}")
     else:
-        print(f"❌ Master database '{ORD_FILE}' does not exist.")
+        print(f" Master database '{ORD_FILE}' does not exist.")
 
 
 if __name__ == "__main__":
@@ -78,6 +78,6 @@ if __name__ == "__main__":
         if confirm == 'y':
             purge_user_data(target_id)
         else:
-            print("🛑 Deletion cancelled.")
+            print(" Deletion cancelled.")
     else:
-        print("❌ Invalid ID. Please enter a number.")
+        print(" Invalid ID. Please enter a number.")

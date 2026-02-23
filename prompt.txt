@@ -1,0 +1,825 @@
+###########collector.py###############
+
+import time
+
+import csv
+
+import threading
+
+import pandas as pd
+
+from pynput import keyboard
+
+import glob
+
+import re
+
+import os
+
+
+
+# Globals for tracking state
+
+press_times = {}
+
+flight_times = {}
+
+last_release_time = None
+
+current_csv = ""
+
+listener = None
+
+stop_session = False
+
+esc_pressed = False
+
+
+
+
+
+def get_key_name(key):
+
+    try:
+
+        return key.char
+
+    except AttributeError:
+
+        return str(key).replace("Key.", "<") + ">"
+
+
+
+
+
+def on_press(key):
+
+    global last_release_time, esc_pressed
+
+    if key == keyboard.Key.esc:
+
+        esc_pressed = True
+
+        return False  # Stops listener immediately
+
+
+
+    timestamp = time.time()
+
+    key_name = get_key_name(key)
+
+    if key_name not in press_times:
+
+        press_times[key_name] = timestamp
+
+        flight_times[key_name] = (timestamp - last_release_time) if last_release_time else 0.0
+
+
+
+
+
+def on_release(key):
+
+    global last_release_time
+
+    release_time = time.time()
+
+    key_name = get_key_name(key)
+
+    if key_name in press_times:
+
+        dwell_time = release_time - press_times[key_name]
+
+        flight_time = flight_times.get(key_name, 0.0)
+
+        with open(current_csv, mode='a', newline='') as file:
+
+            writer = csv.writer(file)
+
+            writer.writerow([key_name, f"{flight_time:.4f}", f"{dwell_time:.4f}"])
+
+        del press_times[key_name]
+
+    last_release_time = release_time
+
+
+
+
+
+def stop_listener():
+
+    print("\n⏱️ 10 seconds are up!")
+
+    if listener: listener.stop()
+
+
+
+
+
+# --- 0. Initialize User ID ---
+
+# Find all existing keystroke data files
+
+existing_files = glob.glob("keystroke_data_User_*.csv")
+
+max_id = 0
+
+
+
+for f in existing_files:
+
+    # Extract the number 'x' from 'keystroke_data_User_x.csv'
+
+    match = re.search(r'User_(\d+)\.csv', f)
+
+    if match:
+
+        uid = int(match.group(1))
+
+        if uid > max_id:
+
+            max_id = uid
+
+
+
+# Start from the next available ID
+
+u_id = max_id + 1
+
+collected_users = []
+
+
+
+# --- 1. Data Collection Phase ---
+
+print("Press [Esc] at any prompt or during typing to stop adding new users.")
+
+if max_id > 0:
+
+    print(f"📁 Found existing data up to User {max_id}. Starting fresh from User {u_id}...")
+
+
+
+while not esc_pressed:
+
+    current_csv = f"keystroke_data_User_{u_id}.csv"
+
+    press_times.clear()
+
+    last_release_time = None
+
+
+
+    with open(current_csv, mode='w', newline='') as file:
+
+        writer = csv.writer(file)
+
+        writer.writerow(["Key", "Flight_Time_s", "Dwell_Time_s"])
+
+
+
+    print(f"\n--- User {u_id} ---")
+
+    input(f"User {u_id}, press [ENTER] to start 10s timer (or [Esc] then [Enter] to quit)...")
+
+
+
+    if esc_pressed:
+
+        # Clean up the empty file if Esc was pressed before typing started
+
+        if os.path.exists(current_csv):
+
+            os.remove(current_csv)
+
+        break
+
+
+
+    timer = threading.Timer(10.0, stop_listener)
+
+    timer.start()
+
+
+
+    with keyboard.Listener(on_press=on_press, on_release=on_release) as l:
+
+        listener = l
+
+        listener.join()
+
+
+
+    collected_users.append(u_id)
+
+    u_id += 1
+
+
+
+# --- 2. Data Combination Phase ---
+
+print("\nCombining all files (Historical & New)...")
+
+all_dfs = []
+
+
+
+# Grab all files again so we combine old sessions and this new session
+
+all_existing_files = glob.glob("keystroke_data_User_*.csv")
+
+
+
+for file_name in all_existing_files:
+
+    match = re.search(r'User_(\d+)\.csv', file_name)
+
+    if match:
+
+        uid = int(match.group(1))
+
+        try:
+
+            df = pd.read_csv(file_name)
+
+            if not df.empty:
+
+                df['ID'] = uid
+
+                all_dfs.append(df)
+
+        except FileNotFoundError:
+
+            continue
+
+
+
+if all_dfs:
+
+    full_data = pd.concat(all_dfs, ignore_index=True)
+
+
+
+    # 1. Unordered File: No ID column, has Serial Number
+
+    unordered = full_data.drop(columns=['ID']).copy()
+
+    unordered.insert(0, 'SL.no.', range(1, len(unordered) + 1))
+
+    unordered.to_csv("combined.csv", index=False)
+
+
+
+    # 2. Ordered File: Has ID column at start, sorted by ID
+
+    ordered = full_data.sort_values(by='ID').copy()
+
+    cols = ['ID'] + [c for c in ordered.columns if c != 'ID']
+
+    ordered = ordered[cols]
+
+    ordered.to_csv("ord_combine.csv", index=False)
+
+
+
+    print(f"✅ Combined {len(all_dfs)} total user files.")
+
+    print(f"✅ Created 'combined.csv' (Unordered, SL.no only)")
+
+    print(f"✅ Created 'ord_combine.csv' (Ordered by ID)")
+
+else:
+
+    print("❌ No data collected or found.")
+
+
+
+#############compartor.py###############
+
+import pandas as pd
+
+import matplotlib.pyplot as plt
+
+import numpy as np
+
+
+
+try:
+
+    # 1. Load both files
+
+    df_true = pd.read_csv("ord_combine.csv")
+
+    df_pred = pd.read_csv("predicted.csv")
+
+
+
+    # 2. Merge to align rows precisely
+
+    merged = pd.merge(df_true, df_pred, on=['Key', 'Flight_Time_s', 'Dwell_Time_s'], how='inner')
+
+
+
+    # 3. Label Alignment Logic
+
+    label_map = {}
+
+    for actual_id in merged['ID'].unique():
+
+        id_data = merged[merged['ID'] == actual_id]
+
+        if not id_data.empty:
+
+            most_frequent_guess = id_data['Predicted_User'].value_counts().idxmax()
+
+            label_map[most_frequent_guess] = actual_id
+
+
+
+    merged['Mapped_Predicted_ID'] = merged['Predicted_User'].map(label_map)
+
+
+
+    # 4. Filter into Correct and Incorrect
+
+    merged['Is_Error'] = merged['ID'] != merged['Mapped_Predicted_ID']
+
+    errors = merged[merged['Is_Error'] == True]
+
+    correct = merged[merged['Is_Error'] == False]
+
+
+
+    # --- 5. Visualization: Two Separate Graphs ---
+
+    # Create a figure with 1 row and 2 columns
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
+
+
+
+    # GRAPH 1: SUCCESSES
+
+    ax1.scatter(correct['Flight_Time_s'], correct['Dwell_Time_s'],
+
+                c='blue', alpha=0.5, s=40, label='Matches')
+
+    ax1.set_title('Graph 1: Correct Profile Matches', fontsize=14, color='blue')
+
+    ax1.set_xlabel('Flight Time (s)')
+
+    ax1.set_ylabel('Dwell Time (s)')
+
+    ax1.grid(True, linestyle=':', alpha=0.6)
+
+    ax1.legend()
+
+
+
+    # GRAPH 2: ERRORS
+
+
+
+    ax2.scatter(errors['Flight_Time_s'], errors['Dwell_Time_s'],
+
+                c='red', alpha=1.0, s=120, marker='X', edgecolors='black', label='Mismatches')
+
+    ax2.set_title('Graph 2: Profile Mismatches (Errors)', fontsize=14, color='red')
+
+    ax2.set_xlabel('Flight Time (s)')
+
+    ax2.set_ylabel('Dwell Time (s)')
+
+    ax2.grid(True, linestyle=':', alpha=0.6)
+
+    ax2.legend()
+
+
+
+    plt.tight_layout()
+
+
+
+    # Print Accuracy Stats
+
+    accuracy = (len(correct) / len(merged)) * 100 if len(merged) > 0 else 0
+
+    print("-" * 30)
+
+    print(f"Comparison Result:")
+
+    print(f"Correct Matches: {len(correct)}")
+
+    print(f"Errors Found:    {len(errors)}")
+
+    print(f"System Accuracy: {accuracy:.2f}%")
+
+    print("-" * 30)
+
+
+
+    plt.show()
+
+
+
+except FileNotFoundError as e:
+
+    print(f"Error: Missing file - {e}")
+
+except Exception as e:
+
+    print(f"An error occurred: {e}")
+
+
+
+##########displayer.py############
+
+import pandas as pd
+
+import matplotlib.pyplot as plt
+
+
+
+
+
+def plot_dwell_vs_flight(filename):
+
+    try:
+
+        # 1. Load the data
+
+        df = pd.read_csv(filename)
+
+
+
+        if df.empty:
+
+            print("No data found in the file.")
+
+            return
+
+
+
+        plt.figure(figsize=(12, 7))
+
+
+
+        # 2. Get unique users
+
+        user_ids = df['ID'].unique()
+
+
+
+        # 3. Create a scatter plot for each user
+
+        for uid in user_ids:
+
+            user_data = df[df['ID'] == uid]
+
+
+
+            plt.scatter(
+
+                user_data['Flight_Time_s'],
+
+                user_data['Dwell_Time_s'],
+
+                alpha=0.6,
+
+                label=f'User {uid}',
+
+                edgecolors='w',
+
+                s=60  # Size of the dots
+
+            )
+
+
+
+        # 4. Styling the graph
+
+        plt.title('Keystroke Signature: Dwell Time vs. Flight Time', fontsize=14)
+
+        plt.xlabel('Flight Time (Seconds between keys)', fontsize=12)
+
+        plt.ylabel('Dwell Time (Seconds key was held)', fontsize=12)
+
+
+
+        # Add a horizontal/vertical line at 0 for clarity
+
+        plt.axhline(0, color='black', lw=1)
+
+        plt.axvline(0, color='black', lw=1)
+
+
+
+        plt.legend(title="User ID")
+
+        plt.grid(True, linestyle='--', alpha=0.5)
+
+
+
+        # 5. Show plot
+
+        print("Generating Scatter Plot...")
+
+        plt.show()
+
+
+
+    except FileNotFoundError:
+
+        print(f"Error: {filename} not found.")
+
+
+
+
+
+if __name__ == "__main__":
+
+    plot_dwell_vs_flight('ord_combine.csv')
+
+
+
+
+
+###############displayer.py################
+
+import pandas as pd
+
+import matplotlib.pyplot as plt
+
+
+
+
+
+def plot_dwell_vs_flight(filename):
+
+    try:
+
+        # 1. Load the data
+
+        df = pd.read_csv(filename)
+
+
+
+        if df.empty:
+
+            print("No data found in the file.")
+
+            return
+
+
+
+        plt.figure(figsize=(12, 7))
+
+
+
+        # 2. Get unique users
+
+        user_ids = df['ID'].unique()
+
+
+
+        # 3. Create a scatter plot for each user
+
+        for uid in user_ids:
+
+            user_data = df[df['ID'] == uid]
+
+
+
+            plt.scatter(
+
+                user_data['Flight_Time_s'],
+
+                user_data['Dwell_Time_s'],
+
+                alpha=0.6,
+
+                label=f'User {uid}',
+
+                edgecolors='w',
+
+                s=60  # Size of the dots
+
+            )
+
+
+
+        # 4. Styling the graph
+
+        plt.title('Keystroke Signature: Dwell Time vs. Flight Time', fontsize=14)
+
+        plt.xlabel('Flight Time (Seconds between keys)', fontsize=12)
+
+        plt.ylabel('Dwell Time (Seconds key was held)', fontsize=12)
+
+
+
+        # Add a horizontal/vertical line at 0 for clarity
+
+        plt.axhline(0, color='black', lw=1)
+
+        plt.axvline(0, color='black', lw=1)
+
+
+
+        plt.legend(title="User ID")
+
+        plt.grid(True, linestyle='--', alpha=0.5)
+
+
+
+        # 5. Show plot
+
+        print("Generating Scatter Plot...")
+
+        plt.show()
+
+
+
+    except FileNotFoundError:
+
+        print(f"Error: {filename} not found.")
+
+
+
+
+
+if __name__ == "__main__":
+
+    plot_dwell_vs_flight('ord_combine.csv')
+
+
+############displayer.py####################
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+def plot_dwell_vs_flight(filename):
+    try:
+        # 1. Load the data
+        df = pd.read_csv(filename)
+
+        if df.empty:
+            print("No data found in the file.")
+            return
+
+        plt.figure(figsize=(12, 7))
+
+        # 2. Get unique users
+        user_ids = df['ID'].unique()
+
+        # 3. Create a scatter plot for each user
+        for uid in user_ids:
+            user_data = df[df['ID'] == uid]
+
+            plt.scatter(
+                user_data['Flight_Time_s'],
+                user_data['Dwell_Time_s'],
+                alpha=0.6,
+                label=f'User {uid}',
+                edgecolors='w',
+                s=60  # Size of the dots
+            )
+
+        # 4. Styling the graph
+        plt.title('Keystroke Signature: Dwell Time vs. Flight Time', fontsize=14)
+        plt.xlabel('Flight Time (Seconds between keys)', fontsize=12)
+        plt.ylabel('Dwell Time (Seconds key was held)', fontsize=12)
+
+        # Add a horizontal/vertical line at 0 for clarity
+        plt.axhline(0, color='black', lw=1)
+        plt.axvline(0, color='black', lw=1)
+
+        plt.legend(title="User ID")
+        plt.grid(True, linestyle='--', alpha=0.5)
+
+        # 5. Show plot
+        print("Generating Scatter Plot...")
+        plt.show()
+
+    except FileNotFoundError:
+        print(f"Error: {filename} not found.")
+
+
+if __name__ == "__main__":
+    plot_dwell_vs_flight('ord_combine.csv')
+
+
+###############detector.py###################
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, confusion_matrix
+import joblib
+
+csv_filename = "ord_combine.csv"
+
+try:
+    # 1. Load the Ground Truth data
+    print(f"Loading actual user data from {csv_filename}...")
+    df = pd.read_csv(csv_filename).dropna()
+
+    actual_users = df['ID'].unique()
+    print(f"✅ Found {len(actual_users)} users in the dataset: {list(actual_users)}")
+
+    # --- UPGRADE 1: Rolling Averages (Smoothing the Rhythm) ---
+    print("Calculating typing rhythm trends...")
+    df['Rolling_Flight'] = df.groupby('ID')['Flight_Time_s'].transform(lambda x: x.rolling(window=3, min_periods=1).mean())
+    df['Rolling_Dwell'] = df.groupby('ID')['Dwell_Time_s'].transform(lambda x: x.rolling(window=3, min_periods=1).mean())
+
+    # --- UPGRADE 2: One-Hot Encoding (Teaching the AI the Keys) ---
+    print("Encoding keyboard layout...")
+    df_encoded = pd.get_dummies(df, columns=['Key'])
+
+    # 2. Extract Features (X) and Target Labels (y)
+    X = df_encoded.drop(columns=['ID'])
+    y = df_encoded['ID']
+
+    # 3. Train/Test Split (80% for studying, 20% for testing)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # 4. Train the Upgraded AI (Random Forest)
+    print("Training the Advanced AI...")
+    rf_model = RandomForestClassifier(n_estimators=200, max_depth=15, random_state=42)
+    rf_model.fit(X_train, y_train)
+
+    # 5. Test Accuracy
+    test_predictions = rf_model.predict(X_test)
+    accuracy = accuracy_score(y_test, test_predictions)
+    print(f"✅ Upgraded Model Accuracy: {accuracy * 100:.2f}%")
+
+    # 6. Predict the whole dataset to create the new `predicted.csv`
+    all_predictions = rf_model.predict(X)
+
+    # Create the clean output dataframe (Using the original df so we don't save the messy math columns)
+    output_df = df.copy()
+    output_df['Predicted_User'] = [f"User_{pred}" for pred in all_predictions]
+
+    # Clean up columns for export
+    output_df = output_df.drop(columns=['ID', 'Rolling_Flight', 'Rolling_Dwell'], errors='ignore')
+    cols = ['Predicted_User'] + [c for c in output_df.columns if c != 'Predicted_User']
+    output_df = output_df[cols]
+
+    # Save it
+    output_df.to_csv("predicted.csv", index=False)
+    print("✅ Saved highly accurate predictions to 'predicted.csv'.")
+
+    # 7. Save the "Brain"
+    joblib.dump(rf_model, 'advanced_keystroke_model.pkl')
+    print("✅ Model saved as 'advanced_keystroke_model.pkl'")
+
+    # --- 8. Visualizing the Confusion Matrix ---
+    plt.figure(figsize=(8, 6))
+    cm = confusion_matrix(y_test, test_predictions)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=[f'User {i}' for i in rf_model.classes_],
+                yticklabels=[f'User {i}' for i in rf_model.classes_])
+
+    plt.title(f"AI Accuracy: {accuracy * 100:.2f}% (Confusion Matrix)", fontsize=14, fontweight='bold')
+    plt.xlabel("What the AI Guessed", fontsize=12)
+    plt.ylabel("Actual User (Truth)", fontsize=12)
+    plt.tight_layout()
+    plt.show()  # Pauses here until you close the window
+
+    # --- 9. Visualizing the Predicted Profiles Scatter Plot ---
+    plt.figure(figsize=(12, 7))
+    unique_preds = sorted(output_df['Predicted_User'].unique())
+    cmap = plt.get_cmap('tab10')
+
+    for i, user_label in enumerate(unique_preds):
+        user_data = output_df[output_df['Predicted_User'] == user_label]
+        plt.scatter(user_data['Flight_Time_s'], user_data['Dwell_Time_s'],
+                    color=cmap(i), label=f'{user_label}',
+                    alpha=0.6, edgecolors='w', s=60)
+
+    plt.title("AI Predicted User Profiles (Upgraded Model Output)", fontsize=14, fontweight='bold')
+    plt.xlabel("Raw Flight Time (Seconds)", fontsize=12)
+    plt.ylabel("Raw Dwell Time (Seconds)", fontsize=12)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', title="AI Prediction")
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.show()
+
+except FileNotFoundError:
+    print(f"❌ Error: Please ensure '{csv_filename}' is in the same folder.")
+except Exception as e:
+    print(f"❌ An error occurred: {e}")
+
+
+
+
+
+
+
+
+
+
+
+
+

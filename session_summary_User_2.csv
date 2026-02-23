@@ -1,0 +1,11 @@
+Sentence,Mean_Dwell,Mean_Flight_UD,Mean_Flight_DD,Overlap_Rate,WPM,Accuracy,Burst_Pause_Count
+subtle timing differences matter,0.07699999999999818,0.0,0.0,0.0,13.636363636363708,3.125,0
+typing rhythm reveals patterns,0.11199999999996635,0.0,0.0,0.0,14.814814814815813,0.0,0
+consistency builds trust in systems,0.08699999999998909,0.0,0.0,0.0,15.706806282722308,0.0,0
+every keystroke tells a story,0.07299999999997908,0.0,0.0,0.0,9.181331293037376,0.0,0
+behavior is harder to fake than passwords,0.1069999999999709,0.0,0.0,0.0,15.18987341772222,0.0,0
+security should feel invisible,0.1570000000000391,0.0,0.0,0.0,14.371257485029314,0.0,0
+the smallest details define the strongest locks,0.15199999999992997,0.0,0.0,0.0,11.080332409972607,0.0,0
+precision creates identity over time,0.10199999999997544,0.0,0.0,0.0,14.101057579318464,0.0,0
+secure systems reduce friction,0.1550000000000864,0.0,0.0,0.0,14.943960149437537,0.0,0
+biometrics improve authentication,0.12799999999992906,0.00050000000004502,0.07900000000000773,0.5,23.278370514065166,0.0,0
